@@ -3,9 +3,10 @@ import supervision as sv
 import torch
 import cv2
 from pathlib import Path
+import datetime
 import itertools
 
-from imutils.video import FileVideoStream, WebcamVideoStream, FPS
+from imutils.video import FileVideoStream, WebcamVideoStream
 
 from sinks.detection_sink import DetectionSink
 from sinks.annotation_sink import AnnotationSink
@@ -13,7 +14,7 @@ from sinks.annotation_sink import AnnotationSink
 import config
 from tools.video_info import VideoInfo
 from tools.messages import source_message, progress_message, step_message
-from tools.write_csv import output_data_list, write_csv
+from tools.write_csv import output_append, write_csv
 
 # For debugging
 from icecream import ic
@@ -52,29 +53,26 @@ def main(
     scaled_height = int(scaled_width * source_info.height / source_info.width)
     scaled_height = scaled_height if source_info.height > scaled_height else source_info.height
 
-    # Outputs
-    output_writer = cv2.VideoWriter(f"{output}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), source_info.fps, (source_info.width, source_info.height))
-
     # Annotators
     annotation_sink = AnnotationSink(
         source_info=source_info,
         trace=True
     )
 
-    # Variables
-    results_data = []
-
     # Iniciar procesamiento de video
     step_message(next(step_count), 'Procesamiento de Video Iniciado ✅')
     
     if source_flag == 'stream':
         video_stream = WebcamVideoStream(src=eval(source) if source.isnumeric() else source)
+        source_writer = cv2.VideoWriter(f"{output}_source.mp4", cv2.VideoWriter_fourcc(*'mp4v'), source_info.fps, (source_info.width, source_info.height))
     elif source_flag == 'video':
         video_stream = FileVideoStream(source)
+    output_writer = cv2.VideoWriter(f"{output}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), source_info.fps, (source_info.width, source_info.height))
 
     frame_number = 0
+    output_data = []
     video_stream.start()
-    fps = FPS().start()
+    time_start = datetime.datetime.now()
     try:
         while video_stream.more() if source_flag == 'video' else True:
             image = video_stream.read()
@@ -89,13 +87,14 @@ def main(
             detections = tracker.update_with_detections(detections)
                 
             # Save object data in list
-            results_data = output_data_list(results_data, frame_number, detections)
+            output_data = output_append(output_data, frame_number, detections)
 
             # Draw annotations
             annotated_image = annotation_sink.on_detections(detections=detections, image=image)
 
             # Save results
             output_writer.write(annotated_image)
+            if source_flag == 'stream': source_writer.write(image)
 
             # Print progress
             progress_message(frame_number, source_info.total_frames)
@@ -109,17 +108,14 @@ def main(
                 print("\n")
                 break
 
-            fps.update()
-
     except KeyboardInterrupt:
         step_message(next(step_count), 'Fin del video ✅')
     step_message(next(step_count), 'Guardando Resultados en el último CSV ✅')
-    write_csv(f"{output}.csv", results_data)
+    write_csv(f"{output}.csv", output_data)
     
-    fps.stop()
-    step_message(next(step_count), f"Elapsed Time: {fps.elapsed():.2f} s")
-    step_message(next(step_count), f"FPS: {fps.fps():.2f}")
+    step_message(next(step_count), f"Elapsed Time: {(datetime.datetime.now() - time_start).total_seconds():.2f} s")
     output_writer.release()
+    if source_flag == 'stream': source_writer.release()
     
     cv2.destroyAllWindows()
     video_stream.stop()
