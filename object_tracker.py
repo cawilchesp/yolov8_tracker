@@ -1,16 +1,14 @@
-from ultralytics import YOLO
 import supervision as sv
 
-import sys
 import torch
 import cv2
-import time
 from pathlib import Path
 import itertools
 
 from imutils.video import FileVideoStream, WebcamVideoStream, FPS
 
 from sinks.detection_sink import DetectionSink
+from sinks.annotation_sink import AnnotationSink
 
 import config
 from tools.video_info import VideoInfo
@@ -58,13 +56,11 @@ def main(
     output_writer = cv2.VideoWriter(f"{output}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), source_info.fps, (source_info.width, source_info.height))
 
     # Annotators
-    line_thickness = int(sv.calculate_optimal_line_thickness(resolution_wh=(source_info.width, source_info.height)) * 0.5)
-    text_scale = sv.calculate_optimal_text_scale(resolution_wh=(source_info.width, source_info.height)) * 0.5
+    annotation_sink = AnnotationSink(
+        source_info=source_info,
+        trace=True
+    )
 
-    label_annotator = sv.LabelAnnotator(text_scale=text_scale, text_padding=2, text_position=sv.Position.TOP_LEFT, text_thickness=line_thickness)
-    bounding_box_annotator = sv.BoundingBoxAnnotator(thickness=line_thickness)
-    trace_annotator = sv.TraceAnnotator(position=sv.Position.CENTER, trace_length=50, thickness=line_thickness)
-    
     # Variables
     results_data = []
 
@@ -86,8 +82,6 @@ def main(
                 print()
                 break
 
-            annotated_image = image.copy()
-
             # YOLO inference
             detections = detection_sink.detect(image=image)
             
@@ -97,23 +91,8 @@ def main(
             # Save object data in list
             results_data = output_data_list(results_data, frame_number, detections)
 
-            # Draw labels
-            object_labels = [f"{data['class_name']} {tracker_id} ({score:.2f})" for _, _, score, _, tracker_id, data in detections]
-            annotated_image = label_annotator.annotate(
-                scene=annotated_image,
-                detections=detections,
-                labels=object_labels )
-
-            # Draw boxes
-            annotated_image = bounding_box_annotator.annotate(
-                scene=annotated_image,
-                detections=detections )
-            
-            # Draw tracks
-            if detections.tracker_id is not None:
-                annotated_image = trace_annotator.annotate(
-                    scene=annotated_image,
-                    detections=detections )
+            # Draw annotations
+            annotated_image = annotation_sink.on_detections(detections=detections, image=image)
 
             # Save results
             output_writer.write(annotated_image)
