@@ -73,8 +73,12 @@ def main(
     output_data = []
     video_stream.start()
     time_start = datetime.datetime.now()
+    fps_monitor = sv.FPSMonitor()
     try:
         while video_stream.more() if source_flag == 'video' else True:
+            fps_monitor.tick()
+            fps_value = fps_monitor.fps
+
             image = video_stream.read()
             if image is None:
                 print()
@@ -97,7 +101,7 @@ def main(
             if source_flag == 'stream': source_writer.write(image)
 
             # Print progress
-            progress_message(frame_number, source_info.total_frames)
+            progress_message(frame_number, source_info.total_frames, fps_value)
             frame_number += 1
 
             # View live results
