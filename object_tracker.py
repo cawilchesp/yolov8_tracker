@@ -59,8 +59,8 @@ def main(
         trace=True
     )
 
-    # Iniciar procesamiento de video
-    step_message(next(step_count), 'Procesamiento de Video Iniciado ✅')
+    # Start video tracking processing
+    step_message(next(step_count), 'Video Tracking Started ✅')
     
     if source_flag == 'stream':
         video_stream = WebcamVideoStream(src=eval(source) if source.isnumeric() else source)
@@ -113,8 +113,8 @@ def main(
                 break
 
     except KeyboardInterrupt:
-        step_message(next(step_count), 'Fin del video ✅')
-    step_message(next(step_count), 'Guardando Resultados en el último CSV ✅')
+        step_message(next(step_count), 'End of Video ✅')
+    step_message(next(step_count), 'Saving Detections in CSV file ✅')
     write_csv(f"{output}.csv", output_data)
     
     step_message(next(step_count), f"Elapsed Time: {(datetime.datetime.now() - time_start).total_seconds():.2f} s")
