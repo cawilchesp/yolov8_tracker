@@ -1,20 +1,20 @@
 import supervision as sv
 
-import torch
 import cv2
-from pathlib import Path
+import torch
 import datetime
 import itertools
+from pathlib import Path
 
 from imutils.video import FileVideoStream, WebcamVideoStream
 
-from sinks.detection_sink import DetectionSink
+from sinks.model_sink import ModelSink
 from sinks.annotation_sink import AnnotationSink
 
 import config
 from tools.video_info import VideoInfo
 from tools.messages import source_message, progress_message, step_message
-from tools.write_csv import output_append, write_csv
+from tools.write_data import csv_append, write_csv
 
 # For debugging
 from icecream import ic
@@ -30,23 +30,19 @@ def main(
 ) -> None:
     # Initialize video source
     source_info, source_flag = VideoInfo.get_source_info(source)
-    step_message(next(step_count), 'Origen del Video Inicializado ✅')
+    step_message(next(step_count), 'Video Source Initialized ✅')
     source_message(source, source_info)
 
     # Check GPU availability
     step_message(next(step_count), f"Processor: {'GPU ✅' if torch.cuda.is_available() else 'CPU ⚠️'}")
 
-    # Initialize YOLOv10 model
-    detection_sink = DetectionSink(
+    # Initialize YOLOv8 model
+    track_sink = ModelSink(
         weights_path=weights,
         image_size=image_size,
         confidence=confidence,
         class_filter=class_filter )
     step_message(next(step_count), f"{Path(weights).stem.upper()} Model Initialized ✅")
-
-    # Initialize ByteTrack
-    tracker = sv.ByteTrack()
-    step_message(next(step_count), f"ByteTrack Initialized ✅")
 
     # show_image size
     scaled_width = 1280 if source_info.width > 1280 else source_info.width
@@ -85,13 +81,13 @@ def main(
                 break
 
             # YOLO inference
-            detections = detection_sink.detect(image=image)
-            
-            # Updating ID with tracker
-            detections = tracker.update_with_detections(detections)
+            results = track_sink.track(image=image)
                 
             # Save object data in list
-            output_data = output_append(output_data, frame_number, detections)
+            output_data = csv_append(output_data, frame_number, results)
+
+            # Convert results to Supervision format
+            detections = sv.Detections.from_ultralytics(results)
 
             # Draw annotations
             annotated_image = annotation_sink.on_detections(detections=detections, image=image)
