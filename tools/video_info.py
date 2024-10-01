@@ -1,53 +1,53 @@
+from __future__ import annotations
+
 import cv2
-from typing import Tuple
+from pathlib import Path
 
 class VideoInfo:
     def __init__(
         self,
+        source: str,
         width: int = 0,
         height: int = 0,
-        fps: int = 0,
-        total_frames: float = None
+        fps: float = 0,
+        total_frames: int = None,
+        source_type: str = None,
+        source_name: str = None
     ) -> None:
         self.width = width
         self.height = height
         self.fps = fps
         self.total_frames = total_frames
+        self.source_type = source_type
+        self.source_name = source_name
+
+        self.get_source_info(source)
 
     @property
-    def resolution_wh(self) -> Tuple[int, int]:
+    def resolution_wh(self) -> tuple[int, int]:
         return self.width, self.height
 
 
-    def get_source_info(source: str):
-        video_source = eval(source) if source.isnumeric() else source
+    def get_source_info(self, source: str) -> VideoInfo:
+        if source.isnumeric():
+            self.source_name = "Webcam"
+            self.source_type = 'stream'
+            video_source = int(source)
+        elif source.lower().startswith('rtsp://'):
+            self.source_name = "RSTP Stream"
+            self.source_type = 'stream'
+            video_source = source
+        else:
+            self.source_name = Path(source).name
+            self.source_type = 'file'
+            video_source = source
+
         cap = cv2.VideoCapture(video_source)
         if not cap.isOpened(): raise Exception('Source video not available ❌')
-        if source.isnumeric() or source.lower().startswith('rtsp://'):
-            source_info = from_camera(cap)
-            source_flag = 'stream'
-        else:
-            source_info = from_video_path(cap)
-            source_flag = 'video'
-        cap.release()
+
+        self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.fps = cap.get(cv2.CAP_PROP_FPS)
+        self.total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self.source_type == 'file' else None
         
-        return source_info, source_flag
-
-
-def from_video_path(source_cap: cv2.VideoCapture) -> VideoInfo:
-    if source_cap.isOpened():
-        width = int(source_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(source_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = source_cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(source_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    return VideoInfo(width, height, fps, total_frames)
-
-
-def from_camera(source_cap: cv2.VideoCapture) -> VideoInfo:
-    if source_cap.isOpened():
-        width = int(source_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(source_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = source_cap.get(cv2.CAP_PROP_FPS)
-
-    return VideoInfo(width, height, fps)
+        cap.release()
