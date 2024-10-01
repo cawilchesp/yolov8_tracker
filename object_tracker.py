@@ -1,3 +1,4 @@
+from ultralytics import YOLO
 import supervision as sv
 
 import cv2
@@ -8,8 +9,8 @@ from pathlib import Path
 
 from imutils.video import FileVideoStream, WebcamVideoStream
 
-from sinks.model_sink import ModelSink
-from sinks.annotation_sink import AnnotationSink
+from modules.model_loader import ModelLoader
+from modules.annotation import Annotation
 
 import config
 from tools.video_info import VideoInfo
@@ -23,21 +24,21 @@ from icecream import ic
 def main(
     source: str = '0',
     output: str = 'output',
-    weights: str = 'yolov8m.pt',
+    weights: str = 'yolo11m.pt',
     class_filter: list[int] = None,
     image_size: int = 640,
     confidence: int = 0.5,
 ) -> None:
     # Initialize video source
-    source_info, source_flag = VideoInfo.get_source_info(source)
+    source_info = VideoInfo(source=source)
     step_message(next(step_count), 'Video Source Initialized ✅')
-    source_message(source, source_info)
+    source_message(source_info)
 
     # Check GPU availability
     step_message(next(step_count), f"Processor: {'GPU ✅' if torch.cuda.is_available() else 'CPU ⚠️'}")
 
     # Initialize YOLOv8 model
-    track_sink = ModelSink(
+    yolo_tracker = ModelLoader(
         weights_path=weights,
         image_size=image_size,
         confidence=confidence,
@@ -50,18 +51,19 @@ def main(
     scaled_height = scaled_height if source_info.height > scaled_height else source_info.height
 
     # Annotators
-    annotation_sink = AnnotationSink(
+    annotator = Annotation(
         source_info=source_info,
-        trace=True
+        trace=True,
+        mask=True
     )
 
     # Start video tracking processing
     step_message(next(step_count), 'Video Tracking Started ✅')
     
-    if source_flag == 'stream':
+    if source_info.source_type == 'stream':
         video_stream = WebcamVideoStream(src=eval(source) if source.isnumeric() else source)
         source_writer = cv2.VideoWriter(f"{output}_source.mp4", cv2.VideoWriter_fourcc(*'mp4v'), source_info.fps, (source_info.width, source_info.height))
-    elif source_flag == 'video':
+    elif source_info.source_type == 'file':
         video_stream = FileVideoStream(source)
     output_writer = cv2.VideoWriter(f"{output}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), source_info.fps, (source_info.width, source_info.height))
 
@@ -71,7 +73,7 @@ def main(
     time_start = datetime.datetime.now()
     fps_monitor = sv.FPSMonitor()
     try:
-        while video_stream.more() if source_flag == 'video' else True:
+        while video_stream.more() if source_info.source_type == 'file' else True:
             fps_monitor.tick()
             fps_value = fps_monitor.fps
 
@@ -81,7 +83,7 @@ def main(
                 break
 
             # YOLO inference
-            results = track_sink.track(image=image)
+            results = yolo_tracker.track(image=image)
                 
             # Save object data in list
             output_data = csv_append(output_data, frame_number, results)
@@ -90,11 +92,14 @@ def main(
             detections = sv.Detections.from_ultralytics(results)
 
             # Draw annotations
-            annotated_image = annotation_sink.on_detections(detections=detections, scene=image)
+            annotated_image = annotator.on_detections(detections=detections, scene=image)
+
+            # Draw masks
+            # annotated_image = annotation_sink.on_masks(detections=detections, scene=image)
 
             # Save results
             output_writer.write(annotated_image)
-            if source_flag == 'stream': source_writer.write(image)
+            if source_info.source_type == 'stream': source_writer.write(image)
 
             # Print progress
             progress_message(frame_number, source_info.total_frames, fps_value)
@@ -115,7 +120,7 @@ def main(
     
     step_message(next(step_count), f"Elapsed Time: {(datetime.datetime.now() - time_start).total_seconds():.2f} s")
     output_writer.release()
-    if source_flag == 'stream': source_writer.release()
+    if source_info.source_type == 'stream': source_writer.release()
     
     cv2.destroyAllWindows()
     video_stream.stop()
