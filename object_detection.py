@@ -8,13 +8,14 @@ import itertools
 
 from imutils.video import FileVideoStream, WebcamVideoStream
 
-from sinks.model_sink import ModelSink
-from sinks.annotation_sink import AnnotationSink
+from modules.model_loader import ModelSink
+from modules.annotation import AnnotationSink
 
 import config
 from tools.video_info import VideoInfo
 from tools.messages import source_message, progress_message, step_message
 from tools.write_data import csv_append, write_csv
+
 
 # For debugging
 from icecream import ic
@@ -126,7 +127,7 @@ if __name__ == "__main__":
         source=f"{config.SOURCE_FOLDER}/{config.INPUT_VIDEO}",
         output=f"{config.OUTPUT_FOLDER}/{config.OUTPUT_NAME}",
         weights=f"{config.MODEL_FOLDER}/{config.MODEL_WEIGHTS}",
-        class_filter=config.CLASS_FILTER,
+        # class_filter=config.CLASS_FILTER,
         image_size=config.IMAGE_SIZE,
         confidence=config.CONFIDENCE,
     )
