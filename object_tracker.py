@@ -5,17 +5,22 @@ import cv2
 import torch
 import datetime
 import itertools
+import numpy as np
 from pathlib import Path
+from collections import defaultdict, deque
+from shapely.geometry import Point, Polygon
 
 from imutils.video import FileVideoStream, WebcamVideoStream
 
 from modules.model_loader import ModelLoader
 from modules.annotation import Annotation
+from modules.zone_analysis import ZoneAnalysis
+from modules.speed import Speed
 
 import config
+import tools.messages as messages
+import tools.write_data as write_data
 from tools.video_info import VideoInfo
-from tools.messages import source_message, progress_message, step_message
-from tools.write_data import csv_append, write_csv
 
 # For debugging
 from icecream import ic
@@ -28,14 +33,15 @@ def main(
     class_filter: list[int] = None,
     image_size: int = 640,
     confidence: int = 0.5,
+    calibration: str = None,
 ) -> None:
     # Initialize video source
     source_info = VideoInfo(source=source)
-    step_message(next(step_count), 'Video Source Initialized ✅')
-    source_message(source_info)
+    messages.step_message(next(step_count), 'Video Source Initialized ✅')
+    messages.source_message(source_info)
 
     # Check GPU availability
-    step_message(next(step_count), f"Processor: {'GPU ✅' if torch.cuda.is_available() else 'CPU ⚠️'}")
+    messages.step_message(next(step_count), f"Processor: {'GPU ✅' if torch.cuda.is_available() else 'CPU ⚠️'}")
 
     # Initialize YOLOv8 model
     yolo_tracker = ModelLoader(
@@ -43,7 +49,7 @@ def main(
         image_size=image_size,
         confidence=confidence,
         class_filter=class_filter )
-    step_message(next(step_count), f"{Path(weights).stem.upper()} Model Initialized ✅")
+    messages.step_message(next(step_count), f"{Path(weights).stem.upper()} Model Initialized ✅")
 
     # show_image size
     scaled_width = 1280 if source_info.width > 1280 else source_info.width
@@ -57,8 +63,25 @@ def main(
         mask=True
     )
 
+    # Initialize zones and calibration
+    zone_data = ZoneAnalysis(json_path=calibration)
+
+    # Initialize speed estimation
+    speed_data = Speed(
+        zone_source=zone_data.calibration_zone,
+        zone_target=np.array(
+            [
+                [0, 0], 
+                [zone_data.calibration_width - 1, 0], 
+                [zone_data.calibration_width - 1, zone_data.calibration_height - 1], 
+                [0, zone_data.calibration_height - 1]
+            ]
+        )
+    )
+    object_track = defaultdict(lambda: deque(maxlen=10))
+
     # Start video tracking processing
-    step_message(next(step_count), 'Video Tracking Started ✅')
+    messages.step_message(next(step_count), 'Video Tracking Started ✅')
     
     if source_info.source_type == 'stream':
         video_stream = WebcamVideoStream(src=eval(source) if source.isnumeric() else source)
@@ -86,13 +109,64 @@ def main(
             results = yolo_tracker.track(image=image)
                 
             # Save object data in list
-            output_data = csv_append(output_data, frame_number, results)
+            output_data = write_data.csv_append(output_data, frame_number, results)
 
             # Convert results to Supervision format
             detections = sv.Detections.from_ultralytics(results)
 
+
+
+            # Seguimiento de objetos
+            is_alarm = False
+            if detections.tracker_id is not None:
+                for tracker_id, (x1, y1, x2, y2) in zip(detections.tracker_id, detections.xyxy):
+                    cx = x1 + (x2 - x1) / 2
+                    cy = y1 + (y2 - y1) / 2
+                    object_track[tracker_id].append((frame_number, cx, cy))
+
+                    if len(object_track[tracker_id]) > 2:
+                        t0, cx0, cy0 = object_track[tracker_id][0]
+                        t1, cx1, cy1 = object_track[tracker_id][-1]
+
+                        distance = cy1-cy0
+
+                        inside_1 = Polygon(zone_data.zones[0].polygon.tolist()).contains(Point(cx0, cy0))
+                        inside_2 = Polygon(zone_data.zones[1].polygon.tolist()).contains(Point(cx0, cy0))
+
+                        if inside_1:
+                            direction = distance * -1
+                        elif inside_2:
+                            direction = distance * 1
+                        else:
+                            direction = 0
+
+                        is_alarm = True if direction < 0 else False
+                    if is_alarm == True: break
+
+
+
+
+            # Draw zones
+            annotated_image = zone_data.on_zones(scene=image)
+
+            if is_alarm == True:
+                annotated_image = sv.draw_text(
+                    scene=annotated_image,
+                    text="Invasion de Carril",
+                    text_anchor=sv.Point(540, 50),
+                    background_color=sv.Color.RED,
+                    text_color=sv.Color.WHITE,
+                    text_scale=2,
+                    text_thickness=2
+                )
+
+
+
+
+
+            
             # Draw annotations
-            annotated_image = annotator.on_detections(detections=detections, scene=image)
+            annotated_image = annotator.on_detections(detections=detections, scene=annotated_image)
 
             # Draw masks
             # annotated_image = annotation_sink.on_masks(detections=detections, scene=image)
@@ -102,7 +176,7 @@ def main(
             if source_info.source_type == 'stream': source_writer.write(image)
 
             # Print progress
-            progress_message(frame_number, source_info.total_frames, fps_value)
+            messages.progress_message(frame_number, source_info.total_frames, fps_value)
             frame_number += 1
 
             # View live results
@@ -114,11 +188,11 @@ def main(
                 break
 
     except KeyboardInterrupt:
-        step_message(next(step_count), 'End of Video ✅')
-    step_message(next(step_count), 'Saving Detections in CSV file ✅')
-    write_csv(f"{output}.csv", output_data)
+        messages.step_message(next(step_count), 'End of Video ✅')
+    messages.step_message(next(step_count), 'Saving Detections in CSV file ✅')
+    write_data.write_csv(f"{output}.csv", output_data)
     
-    step_message(next(step_count), f"Elapsed Time: {(datetime.datetime.now() - time_start).total_seconds():.2f} s")
+    messages.step_message(next(step_count), f"Elapsed Time: {(datetime.datetime.now() - time_start).total_seconds():.2f} s")
     output_writer.release()
     if source_info.source_type == 'stream': source_writer.release()
     
@@ -135,4 +209,5 @@ if __name__ == "__main__":
         class_filter=config.CLASS_FILTER,
         image_size=config.IMAGE_SIZE,
         confidence=config.CONFIDENCE,
+        calibration=f"{config.SOURCE_FOLDER}/{config.JSON_NAME}"
     )
