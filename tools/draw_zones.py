@@ -1,13 +1,20 @@
-import argparse
-import json
+import supervision as sv
+
 import os
+import cv2
+import json
+import argparse
+import itertools
+import numpy as np
 from typing import Any, Optional, Tuple
 
-import cv2
-import numpy as np
+import config
 from tools.general import get_stream_frames_generator
+import tools.messages as messages
 
-import supervision as sv
+# For debugging
+from icecream import ic
+
 
 KEY_ENTER = 13
 KEY_NEWLINE = 10
@@ -130,11 +137,14 @@ def save_polygons_to_json(polygons, target_path):
         json.dump(data_to_save, f)
 
 
-def main(source_path: str, zone_configuration_path: str) -> None:
+def main(
+    source: str,
+    calibration: str
+) -> None:
     global current_mouse_position
-    original_image = resolve_source(source_path=source_path)
+    original_image = resolve_source(source_path=source)
     if original_image is None:
-        print("Failed to load source image.")
+        messages.step_message(step_count, 'No se pudo cargar la imagen ❌')
         return
 
     image = original_image.copy()
@@ -145,27 +155,26 @@ def main(source_path: str, zone_configuration_path: str) -> None:
         key = cv2.waitKey(1) & 0xFF
         if key == KEY_ENTER or key == KEY_NEWLINE:
             close_and_finalize_polygon(image, original_image)
+            messages.step_message(next(step_count), 'Polígono terminado ✅')
         elif key == KEY_ESCAPE:
             POLYGONS[-1] = []
             current_mouse_position = None
+            messages.step_message(step_count, 'Polígono cancelado ❌')
         elif key == KEY_SAVE:
-            save_polygons_to_json(POLYGONS, zone_configuration_path)
-            print(f"Polygons saved to {zone_configuration_path}")
+            save_polygons_to_json(POLYGONS, calibration)
+            messages.step_message(next(step_count), f"Polígonos guardados en {calibration} ✅")
             break
         redraw(image, original_image)
         if key == KEY_QUIT:
+            messages.step_message('Error', 'Proceso cancelado ❌')
             break
 
     cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Interactively draw polygons on images or video frames and save the annotations." )
-    parser.add_argument("--source", type=str, required=True, help="Path to the source image or video file for drawing polygons.")
-    parser.add_argument("--zone_path", type=str, required=True, help="Path where the polygon annotations will be saved as a JSON file.")
-    arguments = parser.parse_args()
-    
+    step_count = itertools.count(1)
     main(
-        source_path=arguments.source,
-        zone_configuration_path=arguments.zone_path,
+        source=f"{config.SOURCE_FOLDER}/{config.INPUT_VIDEO}",
+        calibration=f"{config.SOURCE_FOLDER}/{config.JSON_NAME}"
     )
