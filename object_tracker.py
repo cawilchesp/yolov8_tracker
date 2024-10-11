@@ -15,7 +15,7 @@ from imutils.video import FileVideoStream, WebcamVideoStream
 from modules.model_loader import ModelLoader
 from modules.annotation import Annotation
 from modules.zone_analysis import ZoneAnalysis
-from modules.speed import Speed
+from modules.speed_analysis import SpeedAnalysis
 
 import config
 import tools.messages as messages
@@ -63,23 +63,19 @@ def main(
         mask=True
     )
 
-    # Initialize zones and calibration
-    zone_data = ZoneAnalysis(json_path=calibration)
+    # # Initialize zones and calibration
+    # zone_data = ZoneAnalysis(json_path=calibration)
 
-    # Initialize speed estimation
-    speed_data = Speed(
-        zone_source=zone_data.calibration_zone,
-        zone_target=np.array(
-            [
-                [0, 0], 
-                [zone_data.calibration_width - 1, 0], 
-                [zone_data.calibration_width - 1, zone_data.calibration_height - 1], 
-                [0, zone_data.calibration_height - 1]
-            ]
-        )
-    )
+    # # Initialize speed estimation
+    # speed_data = SpeedAnalysis(
+    #     zone = zone_data.calibration_zone,
+    #     width = zone_data.calibration_width,
+    #     height = zone_data.calibration_height,
+    #     fps=source_info.fps,
+    #     resolution_wh=source_info.resolution_wh
+    # )
     object_track = defaultdict(lambda: deque(maxlen=10))
-
+    
     # Start video tracking processing
     messages.step_message(next(step_count), 'Video Tracking Started ✅')
     
@@ -95,6 +91,7 @@ def main(
     video_stream.start()
     time_start = datetime.datetime.now()
     fps_monitor = sv.FPSMonitor()
+    # smoother = sv.DetectionsSmoother()
     try:
         while video_stream.more() if source_info.source_type == 'file' else True:
             fps_monitor.tick()
@@ -114,62 +111,53 @@ def main(
             # Convert results to Supervision format
             detections = sv.Detections.from_ultralytics(results)
 
+            # # Analysis
+            # if detections.tracker_id is not None:
+            #     speed_track = dict()
+            #     position_track = dict()
+            #     for tracker_id, (x1, y1, x2, y2) in zip(detections.tracker_id, detections.xyxy):
+            #         cx = x1 + (x2 - x1) / 2
+            #         cy = y1 + (y2 - y1) / 2
 
+            #         if not tracker_id in object_track:
+            #             object_track[tracker_id].append((frame_number, cx, cy, 0, 0, 0.0))
+            #         else:
+            #             (ox, oy) = zone_data.orientation(last_position=object_track[tracker_id][-1], new_position=(cx, cy))
+            #             speed = speed_data.speed_calculation(last_position=object_track[tracker_id][-1], new_position=(frame_number, cx, cy))
+            #             object_track[tracker_id].append((frame_number, cx, cy, ox, oy, speed))
 
-            # Seguimiento de objetos
-            is_alarm = False
-            if detections.tracker_id is not None:
-                for tracker_id, (x1, y1, x2, y2) in zip(detections.tracker_id, detections.xyxy):
-                    cx = x1 + (x2 - x1) / 2
-                    cy = y1 + (y2 - y1) / 2
-                    object_track[tracker_id].append((frame_number, cx, cy))
+            #             speed_average = speed_data.speed_estimation(object_track[tracker_id])
+            #             speed_track[tracker_id] = (frame_number, (x1, y1, x2, y2), speed_average)
 
-                    if len(object_track[tracker_id]) > 2:
-                        t0, cx0, cy0 = object_track[tracker_id][0]
-                        t1, cx1, cy1 = object_track[tracker_id][-1]
+            #             directions = zone_data.invasion_estimation((cx, cy), (ox, oy))
+            #             position_track[tracker_id] = (frame_number, (x1, y1, x2, y2), directions)
+                  
+            # # Draw zones
+            # annotated_image = zone_data.annotate_zones(scene=image)
 
-                        distance = cy1-cy0
-
-                        inside_1 = Polygon(zone_data.zones[0].polygon.tolist()).contains(Point(cx0, cy0))
-                        inside_2 = Polygon(zone_data.zones[1].polygon.tolist()).contains(Point(cx0, cy0))
-
-                        if inside_1:
-                            direction = distance * -1
-                        elif inside_2:
-                            direction = distance * 1
-                        else:
-                            direction = 0
-
-                        is_alarm = True if direction < 0 else False
-                    if is_alarm == True: break
-
-
-
-
-            # Draw zones
-            annotated_image = zone_data.on_zones(scene=image)
-
-            if is_alarm == True:
-                annotated_image = sv.draw_text(
-                    scene=annotated_image,
-                    text="Invasion de Carril",
-                    text_anchor=sv.Point(540, 50),
-                    background_color=sv.Color.RED,
-                    text_color=sv.Color.WHITE,
-                    text_scale=2,
-                    text_thickness=2
-                )
-
-
-
-
-
+            # Suavizar las cajas de detección
+            # if detections.tracker_id is not None:
+            #     detections = smoother.update_with_detections(detections)
             
             # Draw annotations
-            annotated_image = annotator.on_detections(detections=detections, scene=annotated_image)
+            annotated_image = annotator.on_detections(detections=detections, scene=image)
 
             # Draw masks
             # annotated_image = annotation_sink.on_masks(detections=detections, scene=image)
+
+            # # Draw speed labels
+            # if detections.tracker_id is not None:
+            #     annotated_image = speed_data.annotate(
+            #         scene=annotated_image,
+            #         speed_track=speed_track
+            #     )
+
+            # # Draw invasion alert
+            # if detections.tracker_id is not None:
+            #     annotated_image = zone_data.annonate_alert(
+            #         scene=annotated_image,
+            #         position_track=position_track
+            #     )
 
             # Save results
             output_writer.write(annotated_image)
@@ -206,7 +194,7 @@ if __name__ == "__main__":
         source=f"{config.SOURCE_FOLDER}/{config.INPUT_VIDEO}",
         output=f"{config.OUTPUT_FOLDER}/{config.OUTPUT_NAME}",
         weights=f"{config.MODEL_FOLDER}/{config.MODEL_WEIGHTS}",
-        class_filter=config.CLASS_FILTER,
+        # class_filter=config.CLASS_FILTER,
         image_size=config.IMAGE_SIZE,
         confidence=config.CONFIDENCE,
         calibration=f"{config.SOURCE_FOLDER}/{config.JSON_NAME}"
