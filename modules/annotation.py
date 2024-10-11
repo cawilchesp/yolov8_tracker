@@ -39,7 +39,7 @@ class Annotation:
         if self.fps: self.fps_monitor = sv.FPSMonitor()
         
         if self.label: self.label_annotator = sv.LabelAnnotator(text_scale=text_scale, text_padding=2, text_position=sv.Position.TOP_LEFT, text_thickness=line_thickness)
-        if self.box: self.bounding_box_annotator = sv.BoundingBoxAnnotator(thickness=line_thickness)
+        if self.box: self.box_annotator = sv.BoxAnnotator(thickness=line_thickness)
         if self.trace: self.trace_annotator = sv.TraceAnnotator(position=sv.Position.CENTER, trace_length=track_length, thickness=line_thickness)
         if self.colorbox: self.color_annotator = sv.ColorAnnotator(color=color_bg, opacity=color_opacity)
         
@@ -82,7 +82,7 @@ class Annotation:
             
         # Draw boxes
         if self.box:
-            scene = self.bounding_box_annotator.annotate(
+            scene = self.box_annotator.annotate(
                 scene=scene,
                 detections=detections )
             
