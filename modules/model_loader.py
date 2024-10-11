@@ -27,6 +27,7 @@ class ModelLoader:
             conf=self.confidence,
             classes=self.class_filter,
             device='cuda' if torch.cuda.is_available() else 'cpu',
+            agnostic_nms=True,
             verbose=False,
         )[0]
         
@@ -41,6 +42,7 @@ class ModelLoader:
             conf=self.confidence,
             classes=self.class_filter,
             device='cuda' if torch.cuda.is_available() else 'cpu',
+            agnostic_nms=True,
             verbose=False,
         )[0]
         
